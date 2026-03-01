@@ -7,7 +7,6 @@ import (
 	"net/netip"
 	"os"
 
-	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
@@ -23,17 +22,17 @@ type CreateOptions struct {
 	AutoRemove    bool
 }
 
-func Create(ctx context.Context, apiClient *client.Client, options CreateOptions) {
+func Create(ctx context.Context, apiClient *client.Client, options CreateOptions) (string, error) {
 	reader, err := apiClient.ImagePull(ctx, options.ImageName, client.ImagePullOptions{})
 	if err != nil {
-		panic(err)
+		return "", fmt.Errorf("Error pulling image: %s", err)
 	}
 	defer reader.Close()
 	io.Copy(os.Stdout, reader)
 
 	cPort, err := network.ParsePort(options.ContainerPort)
 	if err != nil {
-		panic(err)
+		return "", fmt.Errorf("Error creating port: %s", err)
 	}
 
 	// Create a named volume
@@ -77,12 +76,12 @@ func Create(ctx context.Context, apiClient *client.Client, options CreateOptions
 	},
 	)
 	if err != nil {
-		panic(err)
+		return "", fmt.Errorf("Error creating container: %s", err)
 	}
 
 	if _, err := apiClient.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		fmt.Printf("container error: %s", err)
-		panic(err)
+		return "", fmt.Errorf("Error starting container: %s", err)
 	}
 
 	// wait := apiClient.ContainerWait(ctx, resp.ID, client.ContainerWaitOptions{})
@@ -95,10 +94,11 @@ func Create(ctx context.Context, apiClient *client.Client, options CreateOptions
 	// case <-wait.Result:
 	// }
 
-	logs, err := apiClient.ContainerLogs(ctx, resp.ID, client.ContainerLogsOptions{ShowStdout: true})
-	if err != nil {
-		panic(err)
-	}
+	// logs, err := apiClient.ContainerLogs(ctx, resp.ID, client.ContainerLogsOptions{ShowStdout: true})
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	stdcopy.StdCopy(os.Stdout, os.Stderr, logs)
+	// stdcopy.StdCopy(os.Stdout, os.Stderr, logs)
+	return resp.ID, nil
 }
