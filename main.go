@@ -3,13 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/netip"
-	"os"
+	"sync"
 
-	"github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/api/types/mount"
-	"github.com/moby/moby/api/types/network"
+	"go-docker/docker"
+
 	"github.com/moby/moby/client"
 )
 
@@ -19,75 +16,44 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	defer apiClient.Close()
 
-	imageName := "postgres:latest"
-	volumeName := "postgres_date"
-	pgEnv := []string{
-		"POSTGRES_PASSWORD=postgres",
-	}
-	pgCPort := "5432/tcp"
-	mountTarget := "/var/lib/postgresql/data"
-	hostPort := "5432"
+	var wg sync.WaitGroup
 
-	out, err := apiClient.ImagePull(ctx, imageName, client.ImagePullOptions{})
-	if err != nil {
-		panic(err)
-	}
-	defer out.Close()
-	io.Copy(os.Stdout, out)
-
-	cPort, err := network.ParsePort(pgCPort)
-	if err != nil {
-		panic(err)
+	containerOptions1 := docker.CreateOptions{
+		ImageName:  "postgres:latest",
+		VolumeName: "postgres_data",
+		Env: []string{
+			"POSTGRES_PASSWORD=postgres",
+		},
+		ContainerPort: "5432/tcp",
+		MountTarget:   "/var/lib/postgresql",
+		HostPort:      "5432",
+		AutoRemove:    true,
 	}
 
-	// Create a named volume
-	vol, err := apiClient.VolumeCreate(ctx, client.VolumeCreateOptions{
-		Name: volumeName,
+	wg.Go(func() {
+		docker.Create(ctx, apiClient, containerOptions1)
 	})
-	if err != nil {
-		panic(err)
-	}
 
-	containerCfg := container.Config{
-		Env: pgEnv,
-		ExposedPorts: network.PortSet{
-			cPort: struct{}{},
+	containerOptions2 := docker.CreateOptions{
+		ImageName:  "postgres:latest",
+		VolumeName: "postgres_data_2",
+		Env: []string{
+			"POSTGRES_PASSWORD=postgres",
 		},
+		ContainerPort: "5432/tcp",
+		MountTarget:   "/var/lib/postgresql",
+		HostPort:      "5433",
+		AutoRemove:    false,
 	}
 
-	hostCfg := container.HostConfig{
-		Mounts: []mount.Mount{
-			{
-				Type:   mount.TypeVolume, // or mount.TypeBind for bind mount
-				Source: vol.Volume.Name,
-				Target: mountTarget,
-			},
-		},
-		PortBindings: network.PortMap{
-			cPort: []network.PortBinding{
-				{
-					HostIP:   netip.IPv4Unspecified(),
-					HostPort: hostPort,
-				},
-			},
-		},
-	}
+	wg.Go(func() {
+		docker.Create(ctx, apiClient, containerOptions2)
+	})
+	wg.Wait()
 
-	resp, err := apiClient.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Image:      imageName,
-		Config:     &containerCfg,
-		HostConfig: &hostCfg,
-	},
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	if _, err := apiClient.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
-		panic(err)
-	}
-
-	fmt.Println(resp.ID)
+	docker.Volumes(ctx, apiClient)
+	fmt.Println("All container started")
 }
