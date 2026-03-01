@@ -29,6 +29,8 @@ func main() {
 	}
 	defer apiClient.Close()
 
+	containerService := docker.NewContainerService(apiClient)
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
@@ -40,6 +42,7 @@ func main() {
 	}()
 
 	containerOptions1 := docker.CreateOptions{
+		Name:       "Postgres1",
 		ImageName:  "postgres:latest",
 		VolumeName: "postgres_data",
 		Env: []string{
@@ -53,7 +56,7 @@ func main() {
 
 	go func() {
 		fmt.Println("Setting up container 1...")
-		id, err := docker.Create(ctx, apiClient, containerOptions1)
+		id, err := containerService.Create(ctx, apiClient, containerOptions1)
 		if err != nil {
 			fmt.Printf("Could not create container 1 %s", err)
 			return
@@ -64,6 +67,7 @@ func main() {
 	}()
 
 	containerOptions2 := docker.CreateOptions{
+		Name:       "Postgres2",
 		ImageName:  "postgres:latest",
 		VolumeName: "postgres_data_2",
 		Env: []string{
@@ -77,7 +81,7 @@ func main() {
 
 	go func() {
 		fmt.Println("Setting up container 2...")
-		id, err := docker.Create(ctx, apiClient, containerOptions2)
+		id, err := containerService.Create(ctx, apiClient, containerOptions2)
 		if err != nil {
 			fmt.Printf("Could not create container 2 %s", err)
 		}
@@ -85,8 +89,6 @@ func main() {
 		containerIDs = append(containerIDs, id)
 		mu.Unlock()
 	}()
-
-	fmt.Println("All containers created")
 
 	fmt.Println("System is live. Press Ctrl+C to stop.")
 	<-stop
@@ -102,21 +104,11 @@ func main() {
 
 	fmt.Println("Shutting down...")
 
-	stopAllContainers(ctx, apiClient, containerIDs)
-	fmt.Println("Shutdown complete")
-	// docker.Volumes(ctx, apiClient)
-}
-
-func stopAllContainers(ctx context.Context, apiClient *client.Client, containerIds []string) {
-	for _, id := range containerIds {
-		fmt.Printf("Stopping container: %s\n", id)
-		_, err := apiClient.ContainerStop(ctx, id, client.ContainerStopOptions{})
-		if err != nil {
-			fmt.Printf("Could not stop container: %s. %v", id, err)
-		}
-		apiClient.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true})
-		if err != nil {
-			fmt.Printf("Could not remove container: %s. %v", id, err)
+	errs := containerService.StopAndRemoveAllContainers(ctx)
+	if len(errs) > 0 {
+		for _, err := range errs {
+			fmt.Printf("Stop and remove error: %s", err)
 		}
 	}
+	fmt.Println("Shutdown complete")
 }
