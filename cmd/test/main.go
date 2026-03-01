@@ -108,13 +108,15 @@ func main() {
 }
 
 func stopAllContainers(ctx context.Context, apiClient *client.Client, containerIds []string) {
-	errs := docker.StopContainers(ctx, apiClient, containerIds)
-	if errs != nil {
-		fmt.Printf("Could not stop container/s: %+v", errs)
-	}
-
-	errs = docker.RemoveContainers(ctx, apiClient, containerIds)
-	if errs != nil {
-		fmt.Printf("Could not remove container/s: %+v", errs)
+	for _, id := range containerIds {
+		fmt.Printf("Stopping container: %s\n", id)
+		_, err := apiClient.ContainerStop(ctx, id, client.ContainerStopOptions{})
+		if err != nil {
+			fmt.Printf("Could not stop container: %s. %v", id, err)
+		}
+		apiClient.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true})
+		if err != nil {
+			fmt.Printf("Could not remove container: %s. %v", id, err)
+		}
 	}
 }
