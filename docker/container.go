@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"sync"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
@@ -34,6 +35,7 @@ type CreateOptions struct {
 type ContainerService struct {
 	APIClient  *client.Client
 	Containers Containers
+	mu         sync.Mutex
 }
 
 func NewContainerService(apiClient *client.Client) *ContainerService {
@@ -43,17 +45,17 @@ func NewContainerService(apiClient *client.Client) *ContainerService {
 	}
 }
 
-func (s *ContainerService) Create(ctx context.Context, apiClient *client.Client, options CreateOptions) (string, error) {
-	reader, err := apiClient.ImagePull(ctx, options.ImageName, client.ImagePullOptions{})
+func (s *ContainerService) Create(ctx context.Context, options CreateOptions) (string, error) {
+	reader, err := s.APIClient.ImagePull(ctx, options.ImageName, client.ImagePullOptions{})
 	if err != nil {
-		return "", fmt.Errorf("Error pulling image: %s", err)
+		return "", fmt.Errorf("error pulling image: %s", err)
 	}
 	defer reader.Close()
 	io.Copy(os.Stdout, reader)
 
 	cPort, err := network.ParsePort(options.ContainerPort)
 	if err != nil {
-		return "", fmt.Errorf("Error creating port: %s", err)
+		return "", fmt.Errorf("error creating port: %s", err)
 	}
 
 	// Create a named volume
@@ -90,19 +92,19 @@ func (s *ContainerService) Create(ctx context.Context, apiClient *client.Client,
 		},
 	}
 
-	resp, err := apiClient.ContainerCreate(ctx, client.ContainerCreateOptions{
+	resp, err := s.APIClient.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Image:      options.ImageName,
 		Config:     &containerCfg,
 		HostConfig: &hostCfg,
 	},
 	)
 	if err != nil {
-		return "", fmt.Errorf("Error creating container: %s", err)
+		return "", fmt.Errorf("error creating container: %s", err)
 	}
 
-	if _, err := apiClient.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
+	if _, err := s.APIClient.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		fmt.Printf("container error: %s", err)
-		return "", fmt.Errorf("Error starting container: %s", err)
+		return "", fmt.Errorf("error starting container: %s", err)
 	}
 
 	// wait := apiClient.ContainerWait(ctx, resp.ID, client.ContainerWaitOptions{})
@@ -122,11 +124,13 @@ func (s *ContainerService) Create(ctx context.Context, apiClient *client.Client,
 
 	// stdcopy.StdCopy(os.Stdout, os.Stderr, logs)
 	//
+	s.mu.Lock()
 	s.Containers = append(s.Containers, ContainerStatus{
 		ID:         resp.ID,
 		Name:       options.Name,
 		AutoRemove: options.AutoRemove,
 	})
+	s.mu.Unlock()
 
 	return resp.ID, nil
 }
@@ -153,7 +157,7 @@ func StopAndRemoveContainers(ctx context.Context, apiClient *client.Client, cont
 func StopContainers(ctx context.Context, apiClient *client.Client, containers Containers) []error {
 	var errors []error
 	for _, c := range containers {
-		fmt.Printf("Stopping container: %s\n", c)
+		fmt.Printf("Stopping container: %+v\n", c)
 		_, err := apiClient.ContainerStop(ctx, c.ID, client.ContainerStopOptions{})
 		if err != nil {
 			errors = append(errors, err)
@@ -167,7 +171,7 @@ func RemoveContainers(ctx context.Context, apiClient *client.Client, containers 
 	var errors []error
 	for _, c := range containers {
 		if !c.AutoRemove {
-			fmt.Printf("Removing container: %s\n", c)
+			fmt.Printf("Removing container: %+v\n", c)
 			_, err := apiClient.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true})
 			if err != nil {
 				errors = append(errors, err)
