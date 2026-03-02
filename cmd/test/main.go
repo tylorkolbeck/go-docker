@@ -7,21 +7,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"go-docker/docker"
 	"go-docker/server"
 
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 )
 
 func main() {
 	ctx := context.Background()
-
-	var containerIDs []string
-	var mu sync.Mutex
 
 	apiClient, err := client.New(client.FromEnv)
 	if err != nil {
@@ -42,52 +39,49 @@ func main() {
 	}()
 
 	containerOptions1 := docker.CreateOptions{
-		Name:       "Postgres1",
-		ImageName:  "postgres:latest",
-		VolumeName: "postgres_data",
+		Name:      "Postgres1",
+		ImageName: "postgres:latest",
+		Mounts: []mount.Mount{
+			{
+				Type:   mount.TypeVolume,
+				Source: "postgres_data_1",
+				Target: "/var/lib/postgresql",
+			},
+		},
 		Env: []string{
 			"POSTGRES_PASSWORD=postgres",
 		},
 		ContainerPort: "5432/tcp",
-		MountTarget:   "/var/lib/postgresql",
 		HostPort:      "5432",
 		AutoRemove:    true,
 	}
 
 	go func() {
 		fmt.Println("Setting up container 1...")
-		id, err := containerService.Create(ctx, apiClient, containerOptions1)
+		_, err := containerService.Create(ctx, containerOptions1)
 		if err != nil {
 			fmt.Printf("Could not create container 1 %s", err)
 			return
 		}
-		mu.Lock()
-		containerIDs = append(containerIDs, id)
-		mu.Unlock()
 	}()
 
 	containerOptions2 := docker.CreateOptions{
-		Name:       "Postgres2",
-		ImageName:  "postgres:latest",
-		VolumeName: "postgres_data_2",
+		Name:      "Postgres2",
+		ImageName: "postgres:latest",
 		Env: []string{
 			"POSTGRES_PASSWORD=postgres",
 		},
 		ContainerPort: "5432/tcp",
-		MountTarget:   "/var/lib/postgresql",
 		HostPort:      "5433",
 		AutoRemove:    true,
 	}
 
 	go func() {
 		fmt.Println("Setting up container 2...")
-		id, err := containerService.Create(ctx, apiClient, containerOptions2)
+		_, err := containerService.Create(ctx, containerOptions2)
 		if err != nil {
 			fmt.Printf("Could not create container 2 %s", err)
 		}
-		mu.Lock()
-		containerIDs = append(containerIDs, id)
-		mu.Unlock()
 	}()
 
 	fmt.Println("System is live. Press Ctrl+C to stop.")

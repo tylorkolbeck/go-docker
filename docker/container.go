@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 )
@@ -23,11 +24,10 @@ type ContainerStatus struct {
 
 type CreateOptions struct {
 	Name          string
+	Mounts        []mount.Mount
 	ImageName     string
-	VolumeName    string
 	Env           []string
 	ContainerPort string
-	MountTarget   string
 	HostPort      string
 	AutoRemove    bool
 }
@@ -58,14 +58,6 @@ func (s *ContainerService) Create(ctx context.Context, options CreateOptions) (s
 		return "", fmt.Errorf("error creating port: %s", err)
 	}
 
-	// Create a named volume
-	// vol, err := apiClient.VolumeCreate(ctx, client.VolumeCreateOptions{
-	// 	Name: options.VolumeName,
-	// })
-	// if err != nil {
-	// 	panic(err)
-	// }
-
 	containerCfg := container.Config{
 		Env: options.Env,
 		ExposedPorts: network.PortSet{
@@ -75,13 +67,7 @@ func (s *ContainerService) Create(ctx context.Context, options CreateOptions) (s
 
 	hostCfg := container.HostConfig{
 		AutoRemove: options.AutoRemove,
-		// Mounts: []mount.Mount{
-		// 	{
-		// 		Type:   mount.TypeVolume, // or mount.TypeBind for bind mount
-		// 		Source: vol.Volume.Name,
-		// 		Target: options.MountTarget,
-		// 	},
-		// },
+		Mounts:     options.Mounts,
 		PortBindings: network.PortMap{
 			cPort: []network.PortBinding{
 				{
@@ -107,23 +93,6 @@ func (s *ContainerService) Create(ctx context.Context, options CreateOptions) (s
 		return "", fmt.Errorf("error starting container: %s", err)
 	}
 
-	// wait := apiClient.ContainerWait(ctx, resp.ID, client.ContainerWaitOptions{})
-	// select {
-	// case err := <-wait.Error:
-	// 	if err != nil {
-	// 		fmt.Println("SOME ERROR")
-	// 		panic(err)
-	// 	}
-	// case <-wait.Result:
-	// }
-
-	// logs, err := apiClient.ContainerLogs(ctx, resp.ID, client.ContainerLogsOptions{ShowStdout: true})
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// stdcopy.StdCopy(os.Stdout, os.Stderr, logs)
-	//
 	s.mu.Lock()
 	s.Containers = append(s.Containers, ContainerStatus{
 		ID:         resp.ID,
